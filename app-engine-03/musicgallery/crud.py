@@ -1,4 +1,4 @@
-# Copyright 2016 Google Inc.
+# Copyright 2015 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,24 +12,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from musicgallery import get_model
-from flask import Blueprint, redirect, render_template, request, url_for
+from musicgallery import get_model, storage
+from flask import Blueprint, current_app, redirect, render_template, request, \
+    url_for
 
 
 crud = Blueprint('crud', __name__)
 
 
-# [START list]
+# [START upload_image_file]
+def upload_image_file(file):
+    """
+    Upload the user-uploaded file to Google Cloud Storage and retrieve its
+    publicly-accessible URL.
+    """
+    if not file:
+        return None
+
+    public_url = storage.upload_file(
+        file.read(),
+        file.filename,
+        file.content_type
+    )
+
+    current_app.logger.info(
+        "Uploaded file %s as %s.", file.filename, public_url)
+
+    return public_url
+# [END upload_image_file]
+
+
 @crud.route("/")
 def list():
     token = request.args.get('page_token', None)
+    if token:
+        token = token.encode('utf-8')
+
     albums, next_page_token = get_model().list(cursor=token)
 
     return render_template(
         "list.html",
         albums=albums,
         next_page_token=next_page_token)
-# [END list]
 
 
 @crud.route('/<id>')
@@ -38,18 +62,26 @@ def view(id):
     return render_template("view.html", album=album)
 
 
-# [START add]
 @crud.route('/add', methods=['GET', 'POST'])
 def add():
     if request.method == 'POST':
         data = request.form.to_dict(flat=True)
+
+        # If an image was uploaded, update the data to point to the new image.
+        # [START image_url]
+        image_url = upload_image_file(request.files.get('image'))
+        # [END image_url]
+
+        # [START image_url2]
+        if image_url:
+            data['imageUrl'] = image_url
+        # [END image_url2]
 
         album = get_model().create(data)
 
         return redirect(url_for('.view', id=album['id']))
 
     return render_template("form.html", action="Add", album={})
-# [END add]
 
 
 @crud.route('/<id>/edit', methods=['GET', 'POST'])
@@ -58,6 +90,11 @@ def edit(id):
 
     if request.method == 'POST':
         data = request.form.to_dict(flat=True)
+
+        image_url = upload_image_file(request.files.get('image'))
+
+        if image_url:
+            data['imageUrl'] = image_url
 
         album = get_model().update(data, id)
 
